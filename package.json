@@ -1,0 +1,19 @@
+{
+  "type": "module",
+  "scripts": {
+    "start": "ts-node room.ts"
+  },
+  "dependencies": {
+    "dexie": "^4.0.10",
+    "haxball.js": "^2.2.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@swc/cli": "^0.5.2",
+    "@swc/core": "^1.10.3",
+    "@types/ws": "^8.5.13",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
