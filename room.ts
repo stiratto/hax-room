@@ -1,8 +1,11 @@
-import Dexie from "dexie";
 import HaxballJS from "haxball.js";
 import { PlayerObject } from "./types";
 import { WebSocket } from 'ws';
 import { MutedUsers } from "./types";
+import { indexedDB, IDBKeyRange } from "fake-indexeddb";
+import Dexie from "dexie";
+
+const db = new Dexie("HaxballDatabase", { indexedDB: indexedDB, IDBKeyRange: IDBKeyRange });
 
 HaxballJS.then((HBInit) => {
   const room = HBInit({
@@ -10,10 +13,10 @@ HaxballJS.then((HBInit) => {
     maxPlayers: 8,
     public: false,
     noPlayer: true,
-    token: "thr1.AAAAAGdvc6vlD44e2lb1XQ.BU_47bEIUvI",
+    token: "thr1.AAAAAGdwYaNuALG9cMJhSw.UT7fdlHbM10",
   });
 
-  room.setDefaultStadium("Big");
+  room.setDefaultStadium("Small");
   room.setScoreLimit(5);
   room.setTimeLimit(0);
 
@@ -21,20 +24,16 @@ HaxballJS.then((HBInit) => {
     console.log(link)
   }
 
-  let db;
-
   let webSocket = new WebSocket('ws://127.0.0.1:8000/ws');
 
   function initializeDB() {
-    db = new Dexie("TopDatabase");
-
     db.version(1).stores({
-      topGoals: '++id, name, goals',
-      topOwnGoals: '++id, name, own_goals',
-      topAssists: '++id, name, assists',
-      topCs: '++id, name, cs',
-      topWins: '++id, name, wins',
-      topLoses: '++id, name, loses',
+      goals: '++id, name, goals',
+      own_goals: '++id, name, own_goals',
+      assists: '++id, name, assists',
+      cs: '++id, name, cs',
+      wins: '++id, name, wins',
+      loses: '++id, name, loses',
     });
   }
 
@@ -47,24 +46,28 @@ HaxballJS.then((HBInit) => {
     getUpdatedDbTop();
   })
 
-  webSocket.on('message', (event: any) => {
+  webSocket.on('message', async (event: any) => {
     const response = JSON.parse(event);
-    console.log(response)
+
+    // If response.success if false, send message to the user with the details
     if (!response.success) {
-      room.sendAnnouncement(`${response.detail}`)
+      return room.sendAnnouncement(`${response.detail}`, response.data, 888888)
     }
+
+    // !stats
     if (response.type === 'player_stats' && response.data) {
 
       try {
         const data: Player = response.data
         let player = players_joined.find((p) => p.name === data.name)
-
         room.sendAnnouncement(
           `✅:  Wins: ${data.wins} | 😥 Perdidas: ${data.loses} | ⚽ Goles: ${data.goals} | 🤣 Autogoles: ${data.own_goals} | 🦵 Asistencias: ${data.assists} | 🥅 Arcos en cero: ${data.cs}`,
           player.id,
           838388,
-          "bold"
+          "bold",
+          0
         );
+
         return data
       } catch (err) {
         console.error(err)
@@ -72,29 +75,41 @@ HaxballJS.then((HBInit) => {
 
 
     }
-
-    // Check if the response type is to update the top
+    function capitalizeFirstLetter(string) {
+      return string.charAt(0).toUpperCase() + string.slice(1);
+    }
+    // !top
     if (response.type === 'update_top' && response.data) {
       // This is the data that is coming from the backend
-      const updatedData = response.data;
+      const data = response.data;
 
       try {
-        if (Array.isArray(updatedData)) {
-          updatedData.forEach((top) => {
-            let store = db[top];  // Usamos `top.name` para acceder a la tienda correcta
+        if (Array.isArray(data)) {
+          data.forEach(async (top) => {
+            let key = Object.keys(top)[0]
+            let value = Object.values(top)[0] as any
+            let store = db.table(key);
+
             if (store) {
-              store.bulkAdd([
-                {
-                  name: top.name,
-                  top: top.value
-                }
-              ]).catch(error => {
-                console.error('Error al agregar datos:', error);
-              });
+
+              value.map((p) => {
+                store.add(
+                  {
+                    name: p.name,
+                    value: p.value
+                  }
+                ).catch(error => {
+                  console.error('Error al agregar datos:', error);
+                });
+              })
+
             }
+            // store.toCollection().each(function(top) {
+            //   console.log(`from store: ${key} found:`, top)
+            // })
           });
         }
-        console.log('Datos actualizados en la base de datos:', updatedData);
+        // console.log('Datos actualizados en la base de datos:', data);
       } catch (error) {
         console.error('Error al actualizar la base de datos:', error);
       }
@@ -198,9 +213,7 @@ HaxballJS.then((HBInit) => {
     async stats(message: string, player: Player) {
       let data = {
         type: "player_stats",
-        name: player.name
-
-
+        user: { ...player }
       }
 
       webSocket.send(JSON.stringify(data))
@@ -332,8 +345,12 @@ HaxballJS.then((HBInit) => {
     async top(message: string, originPlayer: Player) {
       // [command]: {endpoint, property, label}
       const commandMapping: { [key: string]: { store: string; property: string; label: string } } = {
-        "!topgoles": { store: "topGoals", property: "goals", label: "goles" },
-        "!topautogoles": { store: "topOwnGoals", property: "own_goals", label: "autogoles" },
+        "!topgoles": { store: "goals", property: "goals", label: "goles" },
+        "!topautogoles": { store: "own_goals", property: "own_goals", label: "autogoles" },
+        "!topasistencias": { store: "assists", property: "assists", label: "asistencias" },
+        "!topwins": { store: "wins", property: "wins", label: "ganadas" },
+        "!topperdidas": { store: "loses", property: "loses", label: "perdidas" },
+        "!topcs": { store: "cs", property: "cs", label: "arcos en cero" },
       };
 
       // Find the commandMapping key (command) that is equal to the message (command)
@@ -342,17 +359,10 @@ HaxballJS.then((HBInit) => {
 
       const { store, property, label } = commandMapping[command]
 
+      const topPlayers = await db.table(store).limit(7).sortBy(property)
+      let messageOutput = topPlayers.map((player) => `${player.name}: ${player.value}`).join("\n")
 
-      let table = db[store]
-
-      try {
-        const top = await table.orderBy(property).reverse().limit(10).toArray()
-        console.log(top)
-        let messageOutput = top.map(player => `${player.name}: ${player[property]} goles`).join("\n");
-        room.sendAnnouncement(messageOutput, originPlayer.id, 0xFF0000, "bold");
-      } catch (error) {
-        console.error(error)
-      }
+      room.sendAnnouncement(`Tabla de personas con mas ${label}:\n${messageOutput}`, originPlayer.id, 0xFF0000, "bold");
     }
 
     mute(message: string, player: Player) {
@@ -688,7 +698,7 @@ HaxballJS.then((HBInit) => {
   async function getUpdatedDbTop() {
     const data = {
       type: "update_top",
-      tops: ['goals', 'assists', 'own_goals']
+      tops: ['goals', 'assists', 'own_goals', 'loses', 'wins', 'cs']
     }
 
     webSocket.send(JSON.stringify(data))
