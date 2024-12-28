@@ -7,7 +7,7 @@ import { MutedUsers } from "./types";
 HaxballJS.then((HBInit) => {
   const room = HBInit({
     roomName: "dev mode",
-    maxPlayers: 16,
+    maxPlayers: 8,
     public: false,
     noPlayer: true,
     token: "thr1.AAAAAGdvc6vlD44e2lb1XQ.BU_47bEIUvI",
