@@ -4,6 +4,7 @@ import { WebSocket } from 'ws';
 import { MutedUsers } from "./types";
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 import Dexie from "dexie";
+import * as messages from "./static-messages/messages";
 
 const db = new Dexie("HaxballDatabase", { indexedDB: indexedDB, IDBKeyRange: IDBKeyRange });
 
@@ -20,10 +21,9 @@ HaxballJS.then((HBInit) => {
   room.setScoreLimit(5);
   room.setTimeLimit(0);
 
-  room.onRoomLink = function(link) {
-    console.log(link)
-  }
-
+  let players_joined: Player[] = []
+  let lastPlayerTouchedBall: Player;
+  let preLastTouchedBall: Player;
   let webSocket = new WebSocket('ws://127.0.0.1:8000/ws');
 
   function initializeDB() {
@@ -468,41 +468,7 @@ HaxballJS.then((HBInit) => {
 
   var game = new Game();
 
-  const welcome_messages = {
-    messages: [
-      "Un nuevo raton ha llegado!",
-      "Vienes a jugar o a insultar? Espero que a la segunda.",
-      "Unete a nuestro... nah mentira, no tenemos discord.",
-    ],
-  };
-
-  const leave_messages = {
-    messages: [
-      "se fue! ya lo mando a dormir la mamita?",
-      "tiene que camellar :(.",
-    ],
-  };
-
-  const wepaText = `
-██╗    ██╗███████╗██████╗  █████╗  █████╗  █████╗ 
-██║    ██║██╔════╝██╔══██╗██╔══██╗██╔══██╗██╔══██╗
-██║ █╗ ██║█████╗  ██████╔╝███████║███████║███████║
-██║███╗██║██╔══╝  ██╔═══╝ ██╔══██║██╔══██║██╔══██║
-╚███╔███╔╝███████╗██║     ██║  ██║██║  ██║██║  ██║
- ╚══╝╚══╝ ╚══════╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝
-                                                                  
-`;
-  const oleText = `
- ██████╗ ██╗     ███████╗███████╗███████╗███████╗
-██╔═══██╗██║     ██╔════╝██╔════╝██╔════╝██╔════╝
-██║   ██║██║     █████╗  █████╗  █████╗  █████╗  
-██║   ██║██║     ██╔══╝  ██╔══╝  ██╔══╝  ██╔══╝  
-╚██████╔╝███████╗███████╗███████╗███████╗███████╗
- ╚═════╝ ╚══════╝╚══════╝╚══════╝╚══════╝╚══════╝
-                                                                         
-`;
-
-  const flags = [{ wepa: wepaText }, { ole: oleText }, { ole: oleText }];
+  const flags = [{ wepa: messages.wepaText }, { ole: messages.oleText }, { ole: messages.oleText }];
 
   const messageFunctions = [
     { alias: "!mute", description: "Mutea un usuario", cmd: game.mute.bind(game) },
@@ -523,7 +489,7 @@ HaxballJS.then((HBInit) => {
   ];
 
   function playerJoinMessage(player: Player) {
-    let m = Math.floor(Math.random() * welcome_messages.messages.length);
+    let m = Math.floor(Math.random() * messages.welcome_messages.messages.length);
     room.sendAnnouncement(
       `${player.name} ${welcome_messages.messages[m]}`,
       undefined,
@@ -533,10 +499,10 @@ HaxballJS.then((HBInit) => {
   }
 
   function playerLeaveMessage(player: Player) {
-    let m = Math.floor(Math.random() * leave_messages.messages.length);
+    let m = Math.floor(Math.random() * messages.leave_messages.messages.length);
     // Print welcome message
     room.sendAnnouncement(
-      `${player.name} ${leave_messages.messages[m]}`,
+      `${player.name} ${messages.leave_messages.messages[m]}`,
       undefined,
       0xFF00000,
       "bold"
@@ -631,10 +597,6 @@ HaxballJS.then((HBInit) => {
     return true
   };
 
-  let players_joined: Player[] = []
-  let lastPlayerTouchedBall: Player;
-  let preLastTouchedBall: Player;
-
   room.onPlayerBallKick = async function(player: Player) {
 
     if (lastPlayerTouchedBall) {
@@ -667,6 +629,39 @@ HaxballJS.then((HBInit) => {
     }
   }
 
+  room.onGameStart = async function() {
+    resetAllPlayerStats()
+  }
+
+  room.onRoomLink = function(link) {
+    console.log(link)
+  }
+
+  room.onPlayerJoin = async function(playerJoined: Player) {
+    updateAdmins();
+    const player = new Player({
+      id: playerJoined.id,
+      name: playerJoined.name,
+      team: playerJoined.team,
+      admin: playerJoined.admin,
+      position: playerJoined.position,
+      auth: playerJoined.auth,
+      conn: playerJoined.conn,
+    })
+    players_joined.push(player)
+    playerJoinMessage(playerJoined);
+    room.setPlayerTeam(player.id, availableTeam());
+  };
+
+  room.onPlayerLeave = function(player: Player) {
+    players_joined = players_joined.filter((p) => p.name !== player.name)
+    updateAdmins();
+    resetSinglePlayerStats(player)
+    playerLeaveMessage(player);
+  };
+
+
+
   room.onTeamVictory = async function(score) {
     for (let index = 0; index < players_joined.length; index++) {
       const player = players_joined[index];
@@ -694,7 +689,6 @@ HaxballJS.then((HBInit) => {
 
   }
 
-
   async function getUpdatedDbTop() {
     const data = {
       type: "update_top",
@@ -715,34 +709,5 @@ HaxballJS.then((HBInit) => {
     let player = players_joined.find((p) => p.id === player_data.id)
     player?.resetStats()
   }
-
-  room.onGameStart = async function() {
-    resetAllPlayerStats()
-  }
-
-
-
-  room.onPlayerJoin = async function(playerJoined: Player) {
-    updateAdmins();
-    const player = new Player({
-      id: playerJoined.id,
-      name: playerJoined.name,
-      team: playerJoined.team,
-      admin: playerJoined.admin,
-      position: playerJoined.position,
-      auth: playerJoined.auth,
-      conn: playerJoined.conn,
-    })
-    players_joined.push(player)
-    playerJoinMessage(playerJoined);
-    room.setPlayerTeam(player.id, availableTeam());
-  };
-
-  room.onPlayerLeave = function(player: Player) {
-    players_joined = players_joined.filter((p) => p.name !== player.name)
-    updateAdmins();
-    resetSinglePlayerStats(player)
-    playerLeaveMessage(player);
-  };
 
 });
