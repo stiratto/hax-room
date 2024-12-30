@@ -1,12 +1,8 @@
-import HaxballJS from "haxball.js";
-import { PlayerObject } from "./types";
-import { WebSocket } from 'ws';
-import { MutedUsers } from "./types";
-import { indexedDB, IDBKeyRange } from "fake-indexeddb";
-import Dexie from "dexie";
+import { WebSocket } from "ws";
+import { MutedUsers, PlayerObject } from "./types";
 import * as messages from "./static-messages/messages";
-
-const db = new Dexie("HaxballDatabase", { indexedDB: indexedDB, IDBKeyRange: IDBKeyRange });
+import HaxballJS from "haxball.js";
+import { RoomUtils } from "./roomUtils";
 
 HaxballJS.then((HBInit) => {
   const room = HBInit({
@@ -14,114 +10,71 @@ HaxballJS.then((HBInit) => {
     maxPlayers: 8,
     public: false,
     noPlayer: true,
-    token: "thr1.AAAAAGdwYaNuALG9cMJhSw.UT7fdlHbM10",
+    token: "thr1.AAAAAGdx77uydWGGnvmfYw.EGF3bEE9aMk",
   });
 
   room.setDefaultStadium("Small");
-  room.setScoreLimit(5);
+  room.setScoreLimit(1);
   room.setTimeLimit(0);
+  room.startGame();
 
-  let players_joined: Player[] = []
+  let players_joined: Player[] = [];
   let lastPlayerTouchedBall: Player;
   let preLastTouchedBall: Player;
-  let webSocket = new WebSocket('ws://127.0.0.1:8000/ws');
+  let webSocket = new WebSocket("ws://127.0.0.1:8000/ws");
 
-  function initializeDB() {
-    db.version(1).stores({
-      goals: '++id, name, goals',
-      own_goals: '++id, name, own_goals',
-      assists: '++id, name, assists',
-      cs: '++id, name, cs',
-      wins: '++id, name, wins',
-      loses: '++id, name, loses',
-    });
-  }
+  webSocket.on("open", () => {
+    console.log("Conexión WebSocket abierta");
+  });
 
-
-  initializeDB();
-
-
-  webSocket.on('open', () => {
-    console.log('Conexión WebSocket abierta');
-    getUpdatedDbTop();
-  })
-
-  webSocket.on('message', async (event: any) => {
+  webSocket.on("message", async (event: any) => {
     const response = JSON.parse(event);
+    console.log(response)
 
     // If response.success if false, send message to the user with the details
     if (!response.success) {
-      return room.sendAnnouncement(`${response.detail}`, response.data, 888888)
+      return room.sendAnnouncement(`${response.detail}`, response.data, 888888);
     }
 
     // !stats
-    if (response.type === 'player_stats' && response.data) {
-
+    if (response.type === "player_stats" && response.data) {
       try {
-        const data: Player = response.data
-        let player = players_joined.find((p) => p.name === data.name)
+        const data: Player = response.data;
+        let player = players_joined.find((p) => p.name === data.name);
         room.sendAnnouncement(
           `✅:  Wins: ${data.wins} | 😥 Perdidas: ${data.loses} | ⚽ Goles: ${data.goals} | 🤣 Autogoles: ${data.own_goals} | 🦵 Asistencias: ${data.assists} | 🥅 Arcos en cero: ${data.cs}`,
           player.id,
           838388,
           "bold",
-          0
-        );
+          0,);
 
-        return data
+        return data;
       } catch (err) {
-        console.error(err)
+        console.error(err);
       }
-
-
     }
-    function capitalizeFirstLetter(string) {
-      return string.charAt(0).toUpperCase() + string.slice(1);
-    }
-    // !top
-    if (response.type === 'update_top' && response.data) {
+
+    if (response.type === "update_top" && response.payload) {
       // This is the data that is coming from the backend
-      const data = response.data;
+      if (!response.success) {
+        return console.log(response.detail);
+      }
 
       try {
-        if (Array.isArray(data)) {
-          data.forEach(async (top) => {
-            let key = Object.keys(top)[0]
-            let value = Object.values(top)[0] as any
-            let store = db.table(key);
-
-            if (store) {
-
-              value.map((p) => {
-                store.add(
-                  {
-                    name: p.name,
-                    value: p.value
-                  }
-                ).catch(error => {
-                  console.error('Error al agregar datos:', error);
-                });
-              })
-
-            }
-            // store.toCollection().each(function(top) {
-            //   console.log(`from store: ${key} found:`, top)
-            // })
-          });
-        }
-        // console.log('Datos actualizados en la base de datos:', data);
+        const payload: any = response.payload;
+        game.top(null, null, payload);
       } catch (error) {
-        console.error('Error al actualizar la base de datos:', error);
+        console.error("Error al actualizar la base de datos:", error);
       }
     }
   });
 
-  webSocket.on('error', (error) => {
-    console.error('Error de WebSocket:', error);
+  webSocket.on("error", (error) => {
+    console.error("Error de WebSocket:", error);
   });
 
-  webSocket.on('close', () => {
-    console.log('Conexión WebSocket cerrada');
+  webSocket.on("close", () => {
+    console.log("Conexión WebSocket cerrada");
   });
   enum TeamID {
     Spectators = 0,
@@ -141,7 +94,7 @@ HaxballJS.then((HBInit) => {
     auth: string;
     id: number;
     conn: string;
-    position: { x: number, y: number }
+    position: { x: number; y: number };
     wins?: number;
     loses?: number;
     isMuted?: boolean;
@@ -158,14 +111,14 @@ HaxballJS.then((HBInit) => {
     loses: number;
 
     constructor(options: PlayerOptions) {
-      super()
+      super();
       this.id = options.id ?? 0;
-      this.name = options.name ?? 'Unknown';  // Asegúrate de que 'name' esté presente
+      this.name = options.name ?? "Unknown"; // Asegúrate de que 'name' esté presente
       this.team = options.team ?? 0;
       this.admin = options.admin ?? false;
       this.position = options.position ?? null;
-      this.auth = options.auth ?? '';
-      this.conn = options.conn ?? '';
+      this.auth = options.auth ?? "";
+      this.conn = options.conn ?? "";
       this.cs = options.cs ?? 0;
       this.assists = options.assists ?? 0;
       this.own_goals = options.own_goals ?? 0;
@@ -186,8 +139,6 @@ HaxballJS.then((HBInit) => {
       this.isMuted = false;
     }
   }
-
-
 
   class Game {
     muted_users: MutedUsers[] = [];
@@ -213,17 +164,17 @@ HaxballJS.then((HBInit) => {
     async stats(message: string, player: Player) {
       let data = {
         type: "player_stats",
-        user: { ...player }
-      }
+        user: { ...player },
+      };
 
-      webSocket.send(JSON.stringify(data))
+      webSocket.send(JSON.stringify(data));
     }
 
     async register(message: string, player: Player) {
-      const parts = message.split(" ")
-      const password = parts[1]
+      const parts = message.split(" ");
+      const password = parts[1];
 
-      const player_auth = players_joined?.find((p) => p.id === player.id)?.auth
+      const player_auth = players_joined?.find((p) => p.id === player.id)?.auth;
       const data = {
         type: "register_user",
         user: {
@@ -231,9 +182,9 @@ HaxballJS.then((HBInit) => {
           password: password,
           auth: player_auth,
         },
-      }
+      };
 
-      webSocket.send(JSON.stringify(data))
+      webSocket.send(JSON.stringify(data));
     }
 
     spamFilter(player: Player, message: string) {
@@ -248,7 +199,11 @@ HaxballJS.then((HBInit) => {
       // opts.players_chatted.length - 1 so when it tries to access, it
       // doesnt access -1, it access 1 or 2 or the new index.
       if (ind === -1) {
-        this.opts.players_chatted.push({ id: player.id, lm: [timestamp], tw: [] });
+        this.opts.players_chatted.push({
+          id: player.id,
+          lm: [timestamp],
+          tw: [],
+        });
         ind = this.opts.players_chatted.length - 1;
       } else {
         this.opts.players_chatted[ind].lm.push(timestamp);
@@ -262,7 +217,7 @@ HaxballJS.then((HBInit) => {
       if (this.opts.players_chatted[ind].lm.length >= this.opts.p.N) {
         this.opts.players_chatted[ind].lm.splice(
           0,
-          this.opts.players_chatted[ind].lm.length - this.opts.p.N
+          this.opts.players_chatted[ind].lm.length - this.opts.p.N,
         );
       }
 
@@ -271,16 +226,18 @@ HaxballJS.then((HBInit) => {
         this.opts.players_chatted[ind].lm.length >= this.opts.p.N
       ) {
         const timeDiff =
-          this.opts.players_chatted[ind].lm[this.opts.players_chatted[ind].lm.length - 1] -
-          this.opts.players_chatted[ind].lm[0];
-        const messageRate = this.opts.players_chatted[ind].lm.length / (timeDiff / 1000);
+          this.opts.players_chatted[ind].lm[
+          this.opts.players_chatted[ind].lm.length - 1
+          ] - this.opts.players_chatted[ind].lm[0];
+        const messageRate =
+          this.opts.players_chatted[ind].lm.length / (timeDiff / 1000);
         console.log(messageRate);
         if (messageRate > this.opts.p.TM) {
           room.sendAnnouncement(
             `${player.name} escribe mas lento careverga`,
             player.id,
             838388,
-            "bold"
+            "bold",
           );
           this.opts.players_chatted[ind].tw.push(timestamp);
         }
@@ -288,8 +245,12 @@ HaxballJS.then((HBInit) => {
 
       if (this.opts.players_chatted[ind].tw.length >= this.opts.p.NW) {
         const warningTimeDiff =
-          (this.opts.players_chatted[ind].tw[this.opts.players_chatted[ind].tw.length - 1] -
-            this.opts.players_chatted[ind].tw[this.opts.players_chatted[ind].tw.length - 2]) /
+          (this.opts.players_chatted[ind].tw[
+            this.opts.players_chatted[ind].tw.length - 1
+          ] -
+            this.opts.players_chatted[ind].tw[
+            this.opts.players_chatted[ind].tw.length - 2
+            ]) /
           1000;
         if (warningTimeDiff > this.opts.p.TW) {
           room.kickPlayer(player.id, "flood de mensajes", false);
@@ -303,7 +264,7 @@ HaxballJS.then((HBInit) => {
           `${player.name} fue a tirar paja!`,
           undefined,
           585858,
-          "bold"
+          "bold",
         );
 
         room.setPlayerTeam((playerID = player.id), (team = 0));
@@ -313,7 +274,7 @@ HaxballJS.then((HBInit) => {
           `${player.name} ya regreso, cual video te viste?`,
           undefined,
           585858,
-          "bold"
+          "bold",
         );
         room.setPlayerTeam(player.id, availableTeam());
       }
@@ -342,42 +303,74 @@ HaxballJS.then((HBInit) => {
       return null;
     }
 
-    async top(message: string, originPlayer: Player) {
-      // [command]: {endpoint, property, label}
-      const commandMapping: { [key: string]: { store: string; property: string; label: string } } = {
-        "!topgoles": { store: "goals", property: "goals", label: "goles" },
-        "!topautogoles": { store: "own_goals", property: "own_goals", label: "autogoles" },
-        "!topasistencias": { store: "assists", property: "assists", label: "asistencias" },
-        "!topwins": { store: "wins", property: "wins", label: "ganadas" },
-        "!topperdidas": { store: "loses", property: "loses", label: "perdidas" },
-        "!topcs": { store: "cs", property: "cs", label: "arcos en cero" },
+    async top(
+      message?: string,
+      originPlayer?: Player,
+      payload?: any,
+    ) {
+
+      const commandMapping: {
+        [key: string]: { property: string; label: string };
+      } = {
+        "!topgoles": { property: "goals", label: "goles" },
+        "!topautogoles": { property: "own_goals", label: "autogoles" },
+        "!topasistencias": { property: "assists", label: "asistencias" },
+        "!topwins": { property: "wins", label: "ganadas" },
+        "!topperdidas": { property: "loses", label: "perdidas" },
+        "!topcs": { property: "cs", label: "arcos en cero" },
       };
 
-      // Find the commandMapping key (command) that is equal to the message (command)
-      const command = Object.keys(commandMapping).find((k) => message.startsWith(k))
-      if (!command) return
+      let property;
+      let label;
 
-      const { store, property, label } = commandMapping[command]
+      if (message) {
+        // Find the commandMapping key (command) that is equal to the message (command)
+        let command = Object.keys(commandMapping).find((k) =>
+          message.startsWith(k),
+        );
 
-      const topPlayers = await db.table(store).limit(7).sortBy(property)
-      let messageOutput = topPlayers.map((player) => `${player.name}: ${player.value}`).join("\n")
+        let { property: p, label: l } = commandMapping[command];
+        property = p;
+        label = l;
+        getUpdatedDbTop([property]);
+      }
 
-      room.sendAnnouncement(`Tabla de personas con mas ${label}:\n${messageOutput}`, originPlayer.id, 0xFF0000, "bold");
+      if (payload) {
+        let topUsers: any = [];
+
+        if (payload.data.topResults) {
+          topUsers = payload.data.topResults.map((top) => {
+            const key = Object.keys(top)[0];
+            const value = Object.values(top)[0];
+            return { name: key, value };
+          });
+          let messageOutput = topUsers[0]?.value
+            .map((u) => `${u.name}: ${u.value}`)
+            .join("\n");
+          room.sendAnnouncement(
+            `Tabla de personas con mas ${payload.data.top}:\n${messageOutput}`,
+            null,
+            0xff0000,
+            "bold",
+          );
+        }
+
+      }
+
     }
 
     mute(message: string, player: Player) {
-      const parts = message.split(" ")
-      let pId: string | number = parts[2]
+      const parts = message.split(" ");
+      let pId: string | number = parts[2];
 
-      let duration = parseInt(parts[1])
-
+      let duration = parseInt(parts[1]);
 
       if (pId.includes("#")) {
         pId = parseInt(pId.replace("#", ""));
       }
 
-      this.validateMuteFormat(parts)
-      const originPlayerId = player.id
+      this.validateMuteFormat(parts);
+      const originPlayerId = player.id;
 
       // Check if the player that used the mute comand is an admin
       let admin = room
@@ -397,7 +390,7 @@ HaxballJS.then((HBInit) => {
           "Esa ID no existe o quiza estas tratando de mutear a un admin!",
           originPlayerId,
           787878,
-          "bold"
+          "bold",
         );
 
       this.muted_users.push({
@@ -411,18 +404,18 @@ HaxballJS.then((HBInit) => {
         `${targetPlayer.name} fue muteado por ${admin.name}`,
         undefined,
         999888,
-        "bold"
+        "bold",
       );
 
       setTimeout(() => {
         this.muted_users = this.muted_users.filter(
-          (muted) => muted.player.id !== targetPlayer.id
+          (muted) => muted.player.id !== targetPlayer.id,
         );
         room.sendAnnouncement(
           `El muteo de ${targetPlayer.name} ha expirado, ya puede hablar`,
           undefined,
           787878,
-          "bold"
+          "bold",
         );
       }, duration * 60000);
     }
@@ -430,7 +423,7 @@ HaxballJS.then((HBInit) => {
     unmute(message: string) {
       // Get the ID
       const parts = message.split(" ");
-      let pId
+      let pId;
       if (parts.length === 2) {
         pId = parts[1]; // The ID should be the second part after the command
         if (pId.includes("#")) {
@@ -451,14 +444,14 @@ HaxballJS.then((HBInit) => {
           `Usuario no encontrado`,
           undefined,
           999888,
-          "bold"
+          "bold",
         );
       }
       room.sendAnnouncement(
         `${user_to_unmute.player.name} fue desmuteado!`,
         undefined,
         999888,
-        "bold"
+        "bold",
       );
 
       let userToUnmuteId = this.find_user_index(user_to_unmute.player.id);
@@ -466,214 +459,280 @@ HaxballJS.then((HBInit) => {
     }
   }
 
-  var game = new Game();
+  class EventHandler {
+    messages_leaving: string[];
+    messages_joining: string[];
 
-  const flags = [{ wepa: messages.wepaText }, { ole: messages.oleText }, { ole: messages.oleText }];
+    constructor(leaveMessages: string[], joiningMessages: string[]) {
+      this.messages_leaving = leaveMessages;
+      this.messages_joining = joiningMessages;
+    }
+
+    randomMessage(whichMessage: any) {
+      return whichMessage[Math.floor(Math.random() * whichMessage.length)];
+    }
+
+    playerJoinMessage(player: Player) {
+      let randomMessage = this.randomMessage(this.messages_joining);
+      room.sendAnnouncement(
+        `${player.name} ${randomMessage}`,
+        undefined,
+        0xff0000,
+        "bold",
+      );
+    }
+
+    playerLeaveMessage(player: Player) {
+      let randomMessage = this.randomMessage(this.messages_leaving);
+      // Print welcome message
+      room.sendAnnouncement(
+        `${player.name} ${randomMessage}`,
+        undefined,
+        0xff0000,
+        "bold",
+      );
+    }
+
+    playerAssist(player: Player) {
+      if (lastPlayerTouchedBall) {
+        preLastTouchedBall = lastPlayerTouchedBall;
+      }
+      lastPlayerTouchedBall = player;
+    }
+
+    playerGoal(team) {
+      const player = players_joined.find(
+        (p) => p.name === lastPlayerTouchedBall.name,
+      );
+
+      if (player) {
+        if (player.team !== team) {
+          player.own_goals += 1;
+          room.sendAnnouncement(
+            `${lastPlayerTouchedBall.name} se hizo un AUTOGOL! JAJAJAJAJA!!!!!`,
+            null,
+            0xff0000,
+          );
+        } else {
+          room.sendAnnouncement(
+            `${lastPlayerTouchedBall.name} hizo un GOLAZO!!!!!`,
+            null,
+            0xff0000,
+          );
+          player.goals += 1;
+        }
+      }
+    }
+
+    playerJoined(playerJoined: Player) {
+      roomUtils.updateAdmins();
+      const player = new Player({
+        id: playerJoined.id,
+        name: playerJoined.name,
+        team: playerJoined.team,
+        admin: playerJoined.admin,
+        position: playerJoined.position,
+        auth: playerJoined.auth,
+        conn: playerJoined.conn,
+      });
+      players_joined.push(player);
+      this.playerJoinMessage(playerJoined);
+      room.setPlayerTeam(player.id, roomUtils.availableTeam());
+    }
+
+    playerLeft(player: Player) {
+      players_joined = players_joined.filter((p) => p.name !== player.name);
+      roomUtils.updateAdmins();
+      resetSinglePlayerStats(player);
+      eventHandler.playerLeaveMessage(player);
+    }
+
+    teamVictory(score: ScoresObject) {
+      let winningTeam: number = 0;
+      if (score.red > score.blue) {
+        winningTeam = 1;
+      } else {
+        winningTeam = 2;
+      }
+      for (let index = 0; index < players_joined.length; index++) {
+        const player = players_joined[index];
+        if (player.team === winningTeam) {
+          player.wins += 1;
+        } else if (player.team !== 0) {
+          player.loses += 1;
+        }
+        updatePlayerData(player as Player);
+      }
+    }
+
+    playerTeamChange(changedPlayer: Player, byPlayer: Player) {
+      // If the team's player changes, update the players_joined[player] with the new team
+      const player = players_joined.find((p) => p.id === changedPlayer.id);
+      if (player) {
+        player.team = changedPlayer.team;
+      }
+    }
+  }
+
+  class ChatManager {
+    playerChat(player: Player, message: string) {
+      message = message.toLowerCase().trim();
+      setTimeout(() => {
+        // Spam system
+        for (let i = 0; i < game.muted_users.length; i++) {
+          if (game.muted_users[i].player.name === player.name) {
+            return false;
+          }
+        }
+
+        game.spamFilter(player, message);
+
+        const parts = message.split(" ");
+
+        for (let i = 0; i < messageFunctions.length; i++) {
+          if (parts[0] === messageFunctions[i].alias) {
+            messageFunctions[i].cmd(message, player);
+          }
+        }
+
+        if (game.cooldown) {
+          room.sendAnnouncement(
+            "Debes esperar 10 segundos para enviar otra bandera!",
+            player.id,
+            2500505,
+            "bold",
+          );
+          return;
+        }
+
+        // For each flag in the flags array
+        flags.forEach((flag) => {
+          // Get the key of every flag
+          Object.keys(flag).forEach((key) => {
+            if (message == key && !game.cooldown) {
+              // If the message is equal to the key, reply with the value
+              // associated to that key
+              room.sendAnnouncement(`${flag[key]}`, undefined, 323232, "bold");
+              game.cooldown = true;
+              setTimeout(() => {
+                game.cooldown = false;
+              }, game.cooldownTime);
+            }
+          });
+        });
+      }, 0);
+      return true;
+    }
+  }
+
+  let game = new Game();
+  let eventHandler = new EventHandler(
+    messages.leave_messages.messages,
+    messages.welcome_messages.messages,
+  );
+  let roomUtils = new RoomUtils(room);
+  let chatManager = new ChatManager();
+
+  const flags = [
+    { wepa: messages.wepaText },
+    { ole: messages.oleText },
+    { ole: messages.oleText },
+  ];
 
   const messageFunctions = [
-    { alias: "!mute", description: "Mutea un usuario", cmd: game.mute.bind(game) },
+    {
+      alias: "!mute",
+      description: "Mutea un usuario",
+      cmd: game.mute.bind(game),
+    },
     {
       alias: "!unmute",
       description: "Desmutea un usuario",
       cmd: game.unmute.bind(game),
     },
     { alias: "!afk", description: "Ir AFK", cmd: game.afk.bind(game) },
-    { alias: "!register", description: "Registrarse", cmd: game.register.bind(game) },
-    { alias: "!topgoles", description: "Tabla de goleadores", cmd: game.top.bind(game) },
-    { alias: "!topautogoles", description: "Tabla de personas con mas autogoles", cmd: game.top.bind(game) },
-    { alias: "!topasistencias", description: "Tabla de personas con mas asistencias", cmd: game.top.bind(game) },
-    { alias: "!topwins", description: "Tabla de personas con mas partidas ganadas", cmd: game.top.bind(game) },
-    { alias: "!topperdidas", description: "Tabla de personas con partidas perdidas", cmd: game.top.bind(game) },
-    { alias: "!topcs", description: "Tabla de mejors arqueros", cmd: game.top.bind(game) },
-    { alias: "!stats", description: "Tus stats", cmd: game.stats.bind(game) }
+    {
+      alias: "!register",
+      description: "Registrarse",
+      cmd: game.register.bind(game),
+    },
+    {
+      alias: "!topgoles",
+      description: "Tabla de goleadores",
+      cmd: game.top.bind(game),
+    },
+    {
+      alias: "!topautogoles",
+      description: "Tabla de personas con mas autogoles",
+      cmd: game.top.bind(game),
+    },
+    {
+      alias: "!topasistencias",
+      description: "Tabla de personas con mas asistencias",
+      cmd: game.top.bind(game),
+    },
+    {
+      alias: "!topwins",
+      description: "Tabla de personas con mas partidas ganadas",
+      cmd: game.top.bind(game),
+    },
+    {
+      alias: "!topperdidas",
+      description: "Tabla de personas con partidas perdidas",
+      cmd: game.top.bind(game),
+    },
+    {
+      alias: "!topcs",
+      description: "Tabla de mejors arqueros",
+      cmd: game.top.bind(game),
+    },
+    { alias: "!stats", description: "Tus stats", cmd: game.stats.bind(game) },
   ];
 
-  function playerJoinMessage(player: Player) {
-    let m = Math.floor(Math.random() * messages.welcome_messages.messages.length);
-    room.sendAnnouncement(
-      `${player.name} ${welcome_messages.messages[m]}`,
-      undefined,
-      0xFF00000,
-      "bold"
-    );
-  }
-
-  function playerLeaveMessage(player: Player) {
-    let m = Math.floor(Math.random() * messages.leave_messages.messages.length);
-    // Print welcome message
-    room.sendAnnouncement(
-      `${player.name} ${messages.leave_messages.messages[m]}`,
-      undefined,
-      0xFF00000,
-      "bold"
-    );
-  }
-
-  // If there are no admins left in the room give admin to one of the remaining players.
-  function updateAdmins() {
-    // Get all players
-    var players = room.getPlayerList();
-    if (players.length == 0) return; // No players left, do nothing.
-    if (players.find((player: Player) => player.admin) != null) return; // There's an admin left so do nothing.
-    room.setPlayerAdmin(players[0].id, true); // Give admin to the first non admin player in the list
-  }
-
-  // Get best team to put a player
-  // used when !afk a new player joined
-  function availableTeam() {
-    var players = room.getPlayerList();
-    // Get the team that has less players than the other
-    // If both teams have the same players, random team
-    const redTeam = players.filter((player: Player) => player.team == 1);
-    const blueTeam = players.filter((player: Player) => player.team == 2);
-    return redTeam.length <= blueTeam.length ? 1 : 2;
-  }
-
-
-  const rankOpts = {
-    ranks: {
-      Meme: 0,
-      Bronze: 5,
-      Plata: 15,
-      Lamparita: 30,
-      Pamparita: 100,
-      Estrellita: 150,
-      Diva: 200,
-    },
+  room.onPlayerChat = function(player: Player, message: string) {
+    chatManager.playerChat(player, message);
   };
 
-  function rankSystem(player) { }
-
-  room.onPlayerChat = async function(player: any, message: string) {
-    message = message.toLowerCase().trim();
-    setTimeout(() => {
-      // Spam system
-      for (let i = 0; i < game.muted_users.length; i++) {
-        if (game.muted_users[i].player.name === player.name) {
-          return false;
-        }
-      }
-
-      game.spamFilter(player, message);
-
-
-      const parts = message.split(" ")
-
-      for (let i = 0; i < messageFunctions.length; i++) {
-        if (parts[0] === messageFunctions[i].alias) {
-          messageFunctions[i].cmd(message, player);
-        }
-      }
-
-      if (game.cooldown) {
-        room.sendAnnouncement(
-          "Debes esperar 10 segundos para enviar otra bandera!",
-          player.id,
-          2500505,
-          "bold"
-        );
-        return;
-      }
-
-      // For each flag in the flags array
-      flags.forEach((flag) => {
-        // Get the key of every flag
-        Object.keys(flag).forEach((key) => {
-          if (message == key && !game.cooldown) {
-            // If the message is equal to the key, reply with the value
-            // associated to that key
-            room.sendAnnouncement(`${flag[key]}`, undefined, 323232, "bold");
-            game.cooldown = true;
-            setTimeout(() => {
-              game.cooldown = false;
-            }, game.cooldownTime);
-          }
-        });
-      });
-
-
-    }, 0);
-
-    return true
+  room.onPlayerBallKick = function(player: Player) {
+    eventHandler.playerAssist(player);
   };
 
-  room.onPlayerBallKick = async function(player: Player) {
+  room.onTeamGoal = function(team: TeamID) {
+    eventHandler.playerGoal(team);
+  };
 
-    if (lastPlayerTouchedBall) {
-      preLastTouchedBall = lastPlayerTouchedBall
-    }
-    lastPlayerTouchedBall = player
-  }
-
-  room.onTeamGoal = async function(team: TeamID) {
-    const player = players_joined.find((p) => p.name === lastPlayerTouchedBall.name)
-
-    if (player) {
-      if (player.team !== team) {
-        player.own_goals += 1
-        room.sendAnnouncement(`${lastPlayerTouchedBall.name} se hizo un AUTOGOL! JAJAJAJAJA!!!!!`, null, 0xFF0000)
-
-      } else {
-        room.sendAnnouncement(`${lastPlayerTouchedBall.name} hizo un GOLAZO!!!!!`, null, 0xFF0000)
-        player.goals += 1
-      }
-    }
-
-  }
-
-  room.onPlayerTeamChange = async function(changedPlayer: Player, byPlayer: Player) {
-    // If the team's player changes, update the players_joined[player] with the new team 
-    const player = players_joined.find((p) => p.id === changedPlayer.id)
-    if (player) {
-      player.team = changedPlayer.team
-    }
-  }
+  room.onPlayerTeamChange = async function(
+    changedPlayer: Player,
+    byPlayer: Player,
+  ) {
+    eventHandler.playerTeamChange(changedPlayer, byPlayer);
+  };
 
   room.onGameStart = async function() {
-    resetAllPlayerStats()
-  }
+    resetAllPlayerStats();
+  };
 
   room.onRoomLink = function(link) {
-    console.log(link)
-  }
+    console.log(link);
+  };
 
   room.onPlayerJoin = async function(playerJoined: Player) {
-    updateAdmins();
-    const player = new Player({
-      id: playerJoined.id,
-      name: playerJoined.name,
-      team: playerJoined.team,
-      admin: playerJoined.admin,
-      position: playerJoined.position,
-      auth: playerJoined.auth,
-      conn: playerJoined.conn,
-    })
-    players_joined.push(player)
-    playerJoinMessage(playerJoined);
-    room.setPlayerTeam(player.id, availableTeam());
+    eventHandler.playerJoined(playerJoined);
   };
 
   room.onPlayerLeave = function(player: Player) {
-    players_joined = players_joined.filter((p) => p.name !== player.name)
-    updateAdmins();
-    resetSinglePlayerStats(player)
-    playerLeaveMessage(player);
+    eventHandler.playerLeft(player);
   };
 
-
-
   room.onTeamVictory = async function(score) {
-    for (let index = 0; index < players_joined.length; index++) {
-      const player = players_joined[index];
-      updatePlayerData(player as Player)
-    }
-  }
+    eventHandler.teamVictory(score);
+  };
 
   async function updatePlayerData(player: Player) {
     const data = {
       type: "update_player_data",
       user: {
-        ...player
+        ...player,
       },
       quantity: {
         goals: player?.goals || 0,
@@ -681,33 +740,31 @@ HaxballJS.then((HBInit) => {
         loses: player?.loses || 0,
         wins: player?.wins || 0,
         cs: player?.cs || 0,
-        own_goals: player?.own_goals || 0
-      }
-    }
+        own_goals: player?.own_goals || 0,
+      },
+    };
 
-    webSocket.send(JSON.stringify(data))
-
+    webSocket.send(JSON.stringify(data));
   }
 
-  async function getUpdatedDbTop() {
+  async function getUpdatedDbTop(properties: any) {
+    console.log("se obtuvo el top")
     const data = {
       type: "update_top",
-      tops: ['goals', 'assists', 'own_goals', 'loses', 'wins', 'cs']
-    }
-
-    webSocket.send(JSON.stringify(data))
+      tops: properties[0],
+    };
+    webSocket.send(JSON.stringify(data));
   }
 
   async function resetAllPlayerStats() {
     for (let index = 0; index < players_joined.length; index++) {
       let player = players_joined[index];
-      player.resetStats()
+      player.resetStats();
     }
   }
 
   async function resetSinglePlayerStats(player_data: Player) {
-    let player = players_joined.find((p) => p.id === player_data.id)
-    player?.resetStats()
+    let player = players_joined.find((p) => p.id === player_data.id);
+    player?.resetStats();
   }
-
 });

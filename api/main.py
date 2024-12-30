@@ -22,6 +22,7 @@ SECRET_KEY = os.getenv("HAX_SECRET_KEY")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 120
 
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
@@ -30,6 +31,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
+
 
 engine = create_engine(f"{db_url}", echo=True)
 
@@ -76,7 +78,13 @@ async def handleMessage(message: dict, websocket: WebSocket):
         results = await update_top(tops_to_update)
         if results:
             await websocket.send_json(
-                {"type": "update_top", "success": True, "data": results},
+                {
+                    "type": "update_top",
+                    "success": True,
+                    "payload": {
+                        "data": {"topResults": results, "top": tops_to_update},
+                    },
+                },
             )
         else:
             await websocket.send_json(
@@ -114,12 +122,22 @@ def getUsers():
 @app.post("/register/")
 def register(user: User):
     with Session(engine) as session:
-        hashed_password = get_password_hash(user.password, pwd_context)
-        user = User(name=user.name, password=hashed_password, auth=user.auth)
-        session.add(user)
-        session.commit()
-        session.refresh(user)
-        return {"id": user.id, "username": user.name}
+        statement = (
+            select(User).where(User.name == user.name).where(User.auth == user.auth)
+        )
+
+        userExists = session.exec(statement).first()
+
+        if userExists:
+            return "User already exists"
+        else:
+            hashed_password = get_password_hash(user.password, pwd_context)
+
+            user = User(name=user.name, password=hashed_password, auth=user.auth)
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            return {"id": user.id, "username": user.name}
 
 
 def update_player_data(user: User, quantity: Quantity):
@@ -140,28 +158,27 @@ def update_player_data(user: User, quantity: Quantity):
             raise HTTPException(status_code=404, detail="Player not found")
 
 
-async def update_top(tops_to_update: List[str]):
+async def update_top(top: str):
     results = []
     with Session(engine) as session:
-        for top in tops_to_update:
-            column = getattr(User, top, None)
-            if not column:
-                raise HTTPException(status_code=400, detail=f"Invalid top: {top}")
+        column = getattr(User, top, None)
+        if not column:
+            raise HTTPException(status_code=400, detail=f"Invalid top: {top}")
 
-            statement = select(column, User.name).order_by(column.desc()).limit(10)
-            query_results = session.exec(statement).all()
+        statement = select(column, User.name).order_by(column.desc()).limit(5)
+        query_results = session.exec(statement).all()
 
-            formatted_results = [
-                {"name": result[1], "value": getattr(result, top)}
-                for result in query_results
-            ]
+        formatted_results = [
+            {"name": result[1], "value": getattr(result, top)}
+            for result in query_results
+        ]
 
-            results.append({top: formatted_results})
+        results.append({top: formatted_results})
 
     if results:
         return results
     else:
-        return None
+        return top
 
 
 def login(user: User):
@@ -185,7 +202,7 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
-            print(message)
+            print("frontend: ", message)
             await handleMessage(message, websocket)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
