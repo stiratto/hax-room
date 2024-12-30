@@ -4,7 +4,9 @@
     "start": "ts-node room.ts"
   },
   "dependencies": {
+    "axios": "^1.7.9",
     "dexie": "^4.0.10",
+    "form-data": "^4.0.1",
     "haxball.js": "^2.2.2",
     "ws": "^8.18.0"
   },

@@ -12,7 +12,7 @@ from app.models.quantity import Quantity
 from app.models.tops import Tops
 from app.models.connection_manager import ConnectionManager
 from passlib.context import CryptContext
-from typing import List
+from typing import Any, List
 import os
 import json
 
@@ -51,22 +51,23 @@ async def handleMessage(message: dict, websocket: WebSocket):
     if message["type"] == "player_stats":
         try:
             user = User(**message["user"])
-            results = get_user_stats(user)
-            if isinstance(results, dict):
+            results: dict[str, Any] = get_user_stats(user)
+            print(results)
+            if results["success"]:
                 await websocket.send_json(
                     {
                         "type": "player_stats",
                         "success": True,
-                        "data": results,
+                        "data": results["data"],
                     },
                 )
-            elif isinstance(results, int):
+            elif not results["success"]:
                 await websocket.send_json(
                     {
                         "type": "player_stats",
                         "success": False,
                         "detail": "La cuenta no esta registrada, utiliza !register (contrasena)",
-                        "data": results,
+                        "data": results["data"],
                     },
                 )
 
@@ -97,18 +98,20 @@ async def handleMessage(message: dict, websocket: WebSocket):
             )
 
 
-def get_user_stats(user: User):
+def get_user_stats(user: User) -> dict[str, Any]:
     with Session(engine) as session:
         try:
-            statement = select(User).where(User.name == user.name)
+            statement = select(User).where(User.auth == user.auth)
             result = session.exec(statement).first()
             if result:
                 data = result.model_dump()
-                return data
+                return {"success": True, "data": data}
             else:
-                return user.id
+                data = user.model_dump()
+                return {"success": False, "data": data}
         except Exception as e:
             print(e)
+            return {"success": False, "data": None}
 
 
 @app.get("/users/")

@@ -3,6 +3,9 @@ import { MutedUsers, PlayerObject } from "./types";
 import * as messages from "./static-messages/messages";
 import HaxballJS from "haxball.js";
 import { RoomUtils } from "./roomUtils";
+import fs from 'fs'
+import axios from 'axios'
+import FormData from 'form-data'
 
 HaxballJS.then((HBInit) => {
   const room = HBInit({
@@ -10,8 +13,23 @@ HaxballJS.then((HBInit) => {
     maxPlayers: 8,
     public: false,
     noPlayer: true,
-    token: "thr1.AAAAAGdx77uydWGGnvmfYw.EGF3bEE9aMk",
+    token: "thr1.AAAAAGdzCLYod3ACrrC_Dg.D_yB5t7Uz1c",
   });
+
+  let replaysChannelWebhook = "https://discord.com/api/webhooks/1323390391306682400/-MHYajpHIvqsVKxlh4vYynMleCDm_G4Be6y86nVe52e6wKX_ZRufAKypHLhsTEVte102"
+
+  const sendDiscordMessage = async (webhook: string, message: any) => {
+    try {
+      const response = await axios.post(webhook, message)
+      if (response.status === 200) {
+        console.log('Mensaje enviado!')
+      } else {
+        console.log(`Error al enviar el mensaje al webhook de discord: ${webhook}`)
+      }
+    } catch (err) {
+      console.log(err)
+    }
+  }
 
   room.setDefaultStadium("Small");
   room.setScoreLimit(1);
@@ -19,8 +37,6 @@ HaxballJS.then((HBInit) => {
   room.startGame();
 
   let players_joined: Player[] = [];
-  let lastPlayerTouchedBall: Player;
-  let preLastTouchedBall: Player;
   let webSocket = new WebSocket("ws://127.0.0.1:8000/ws");
 
   webSocket.on("open", () => {
@@ -30,17 +46,18 @@ HaxballJS.then((HBInit) => {
   webSocket.on("message", async (event: any) => {
     const response = JSON.parse(event);
     console.log(response)
-
     // If response.success if false, send message to the user with the details
     if (!response.success) {
-      return room.sendAnnouncement(`${response.detail}`, response.data, 888888);
+      let player = players_joined.find((p) => p.auth === response.data.auth)
+      return room.sendAnnouncement(`${response.detail}`, player.id, 888888);
     }
 
     // !stats
     if (response.type === "player_stats" && response.data) {
       try {
         const data: Player = response.data;
-        let player = players_joined.find((p) => p.name === data.name);
+        let player = players_joined.find((p: Player) => p.auth === data.auth);
+        console.log(`player found: ${player.name} ${player.auth}`)
         room.sendAnnouncement(
           `✅:  Wins: ${data.wins} | 😥 Perdidas: ${data.loses} | ⚽ Goles: ${data.goals} | 🤣 Autogoles: ${data.own_goals} | 🦵 Asistencias: ${data.assists} | 🥅 Arcos en cero: ${data.cs}`,
           player.id,
@@ -56,10 +73,6 @@ HaxballJS.then((HBInit) => {
 
     if (response.type === "update_top" && response.payload) {
       // This is the data that is coming from the backend
-      if (!response.success) {
-        return console.log(response.detail);
-      }
-
       try {
         const payload: any = response.payload;
         game.top(null, null, payload);
@@ -152,6 +165,14 @@ HaxballJS.then((HBInit) => {
       players_chatted: [],
     };
 
+    findUserOnline(player) {
+      try {
+        return players_joined.find((p) => p.id === player.id && p.name === player.name)
+      } catch (err) {
+        console.log("Couldn't find a user online with that id ::findUserOnline(player)::")
+      }
+    }
+
     find_user_index(pId: number): number {
       for (let i = 0; i < this.opts.players_chatted.length; i += 1) {
         if (pId === this.opts.players_chatted[i].id) {
@@ -162,12 +183,17 @@ HaxballJS.then((HBInit) => {
     }
 
     async stats(message: string, player: Player) {
-      let data = {
-        type: "player_stats",
-        user: { ...player },
-      };
+      let playerOnline = this.findUserOnline(player)
 
-      webSocket.send(JSON.stringify(data));
+      console.log(playerOnline.auth, playerOnline.name)
+      if (playerOnline) {
+        let data = {
+          type: "player_stats",
+          user: { ...playerOnline },
+        };
+        webSocket.send(JSON.stringify(data));
+      }
+
     }
 
     async register(message: string, player: Player) {
@@ -231,7 +257,6 @@ HaxballJS.then((HBInit) => {
           ] - this.opts.players_chatted[ind].lm[0];
         const messageRate =
           this.opts.players_chatted[ind].lm.length / (timeDiff / 1000);
-        console.log(messageRate);
         if (messageRate > this.opts.p.TM) {
           room.sendAnnouncement(
             `${player.name} escribe mas lento careverga`,
@@ -459,6 +484,9 @@ HaxballJS.then((HBInit) => {
     }
   }
 
+  let lastPlayerTouchedBall: Player;
+  let preLastTouchedBall: Player;
+
   class EventHandler {
     messages_leaving: string[];
     messages_joining: string[];
@@ -493,33 +521,49 @@ HaxballJS.then((HBInit) => {
       );
     }
 
-    playerAssist(player: Player) {
-      if (lastPlayerTouchedBall) {
-        preLastTouchedBall = lastPlayerTouchedBall;
-      }
-      lastPlayerTouchedBall = player;
-    }
-
     playerGoal(team) {
-      const player = players_joined.find(
-        (p) => p.name === lastPlayerTouchedBall.name,
+      const goalPlayer = players_joined.find(
+        (p) => p.id === lastPlayerTouchedBall.id,
       );
 
-      if (player) {
-        if (player.team !== team) {
-          player.own_goals += 1;
+      let assistPlayer: Player;
+      if (preLastTouchedBall) {
+        assistPlayer = players_joined.find((p) => p.name === preLastTouchedBall.name)
+      }
+
+      const gameData = room.getScores()
+      const emoji = goalPlayer.team === 1 ? "🔴" : "🔵"
+      const minutes = Math.floor(gameData.time / 60)
+      const secondsRounded = Math.round(gameData.time % 60)
+
+      const seconds = String(secondsRounded).padStart(2, '0');
+
+      if (goalPlayer) {
+        if (goalPlayer.team !== team) {
+          goalPlayer.own_goals += 1;
           room.sendAnnouncement(
-            `${lastPlayerTouchedBall.name} se hizo un AUTOGOL! JAJAJAJAJA!!!!!`,
+            `[${minutes}:${seconds}] ${emoji} | ${lastPlayerTouchedBall.name} se hizo un AUTOGOL! JAJAJAJAJA!!!!!`,
             null,
             0xff0000,
           );
+          return
+        } else if (assistPlayer && goalPlayer.team === team && assistPlayer.team === team) {
+          room.sendAnnouncement(
+            `[${minutes}:${seconds}] ${emoji} | ${goalPlayer.name} hizo un GOLAZO con asistencia de ${assistPlayer.name}!!!!`,
+            null,
+            0xff0000,
+          );
+          goalPlayer.goals += 1;
+          assistPlayer.assists += 1
+          return
         } else {
           room.sendAnnouncement(
-            `${lastPlayerTouchedBall.name} hizo un GOLAZO!!!!!`,
+            `[${minutes}:${seconds}] ${emoji} | ${goalPlayer.name} hizo un GOLAZO!!!!`,
             null,
             0xff0000,
           );
-          player.goals += 1;
+          goalPlayer.goals += 1;
+          return
         }
       }
     }
@@ -694,7 +738,11 @@ HaxballJS.then((HBInit) => {
   };
 
   room.onPlayerBallKick = function(player: Player) {
-    eventHandler.playerAssist(player);
+    if (lastPlayerTouchedBall && player.id !== lastPlayerTouchedBall.id) {
+      preLastTouchedBall = lastPlayerTouchedBall
+    }
+
+    lastPlayerTouchedBall = player
   };
 
   room.onTeamGoal = function(team: TeamID) {
@@ -708,8 +756,10 @@ HaxballJS.then((HBInit) => {
     eventHandler.playerTeamChange(changedPlayer, byPlayer);
   };
 
+  let recording: any;
   room.onGameStart = async function() {
     resetAllPlayerStats();
+    room.startRecording()
   };
 
   room.onRoomLink = function(link) {
@@ -726,7 +776,71 @@ HaxballJS.then((HBInit) => {
 
   room.onTeamVictory = async function(score) {
     eventHandler.teamVictory(score);
+    sendMatchResume(score)
   };
+
+  async function sendMatchResume(score) {
+    recording = room.stopRecording()
+
+    fs.writeFileSync('replay.hbr2', recording);
+    const formData = new FormData();
+
+    const gameData = room.getScores()
+    const minutes = Math.floor(gameData.time / 60)
+    const secondsRounded = Math.round(gameData.time % 60)
+
+    const seconds = String(secondsRounded).padStart(2, '0');
+
+    const redTeam = players_joined.filter((p) => p.team !== 2 && p.team !== 0)
+    const blueTeam = players_joined.filter((p) => p.team !== 1 && p.team !== 0)
+    const embed = {
+      "embeds": [
+        {
+          "title": "🎮 **Informe Final de la Partida** 🏁\n",
+          "description": `
+          **PUNTUACIONES**:
+
+          ⏱️  [${minutes}:${seconds}] 🔴 Equipo Rojo ${score.red} - ${score.blue} 🔵 Equipo Azul
+
+          ---------
+
+          **🔴 ESTADISTICAS EQUIPO ROJO**
+          ${redTeam.map((p) => {
+            if (p.goals >= 1) {
+              return `- ${p.name}: ${'⚽'.repeat(p.goals)} ${'🅰️ '.repeat(p.assists)} ${'🛑'.repeat(p.own_goals)}`
+            }
+            `${p.name}`
+          }).join('\n')}
+
+          ---------
+
+          **🔵 ESTADISTICAS EQUIPO AZUL**
+
+          ---------
+
+          ${blueTeam.map((p) => {
+            if (p.goals >= 1) {
+              return `- ${p.name}: ${'⚽'.repeat(p.goals)} ${'🅰️ '.repeat(p.assists)} ${'🛑'.repeat(p.own_goals)}`
+            }
+            `${p.name}`
+          }).join('\n')}
+
+          `,
+          "color": 16711680 // Puedes personalizar el color del embed
+        }
+      ]
+    };
+
+    formData.append('payload_json', JSON.stringify(embed));
+    await sendDiscordMessage(formData)
+
+    let fileFormData = new FormData()
+    fileFormData.append('file', fs.createReadStream('replay.hbr2'), {
+      filename: 'replay.hbr2'
+    });
+
+    await sendDiscordMessage(fileFormData)
+  }
 
   async function updatePlayerData(player: Player) {
     const data = {
@@ -748,7 +862,6 @@ HaxballJS.then((HBInit) => {
   }
 
   async function getUpdatedDbTop(properties: any) {
-    console.log("se obtuvo el top")
     const data = {
       type: "update_top",
       tops: properties[0],
@@ -761,6 +874,8 @@ HaxballJS.then((HBInit) => {
       let player = players_joined[index];
       player.resetStats();
     }
+    lastPlayerTouchedBall = null
+    preLastTouchedBall = null
   }
 
   async function resetSinglePlayerStats(player_data: Player) {
