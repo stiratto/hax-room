@@ -1,8 +1,5 @@
-from app.helpers.helpers import (
-    create_db_and_tables,
-    get_password_hash,
-    verify_password,
-)
+from api.app.config import Settings
+from app.helpers.helpers import Helpers 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from sqlmodel import Session, create_engine, select
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,16 +13,12 @@ from typing import Any, List
 import os
 import json
 
+setti
 
-db_url = os.getenv("HAXROOM_DB_URL")
-SECRET_KEY = os.getenv("HAX_SECRET_KEY")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 120
-
+print(f"{}")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
 
 app = FastAPI()
 app.add_middleware(
