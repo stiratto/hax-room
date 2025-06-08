@@ -1,6 +1,11 @@
 # Haxball Room Script by Stiratto
 
-Haxball room script that's still being developed, it counts with: Top system, user stats system to date.
+Haxball room script that's still being developed, it counts with: 
+- Top system
+- User stats system
+- Match recordings sent to a Discord server using Discord Webhooks
+- Authentication system
+- Miscelaneous commands
 
 ### Built with:
 
