@@ -126,7 +126,7 @@ HaxballJS.then((HBInit) => {
     constructor(options: PlayerOptions) {
       super();
       this.id = options.id ?? 0;
-      this.name = options.name ?? "Unknown"; // Asegúrate de que 'name' esté presente
+      this.name = options.name ?? "Unknown";
       this.team = options.team ?? 0;
       this.admin = options.admin ?? false;
       this.position = options.position ?? null;
