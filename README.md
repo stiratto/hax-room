@@ -6,6 +6,7 @@ Haxball room script that's still being developed, it counts with:
 - Match recordings sent to a Discord server using Discord Webhooks
 - Authentication system
 - Miscelaneous commands
+- Goal & Assists & Posession systems
 
 ### Built with:
 
